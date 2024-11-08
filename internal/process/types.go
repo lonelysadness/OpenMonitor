@@ -150,3 +150,16 @@ func (p *Process) IsLeader() bool {
 	defer p.Unlock()
 	return p.isLeader
 }
+
+func (p *Process) IsIdentified() bool {
+	if p == nil {
+		return false
+	}
+
+	switch p.Pid {
+	case UndefinedProcessID, UnidentifiedProcessID, UnsolicitedProcessID:
+		return false
+	default:
+		return true
+	}
+}

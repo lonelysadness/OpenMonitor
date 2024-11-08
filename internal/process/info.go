@@ -116,22 +116,9 @@ func GetOrFindProcess(pid uint32) (*Process, error) {
 
 	key := getProcessKey(int(pid), createdAt)
 
-	// Use globalCache instead of direct map access
-	if proc, exists := globalCache.Get(key); exists {
-		return proc, nil
-	}
-
-	// Load process with singleflight to prevent duplicate loading
+	// Use singleflight for concurrent loading
 	p, err, _ := getProcessGroup.Do(key, func() (interface{}, error) {
-		proc, err := loadProcess(pInfo, key, createdAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load process: %w", err)
-		}
-
-		// Add to cache
-		globalCache.Put(proc)
-
-		return proc, nil
+		return loadProcess(pInfo, key, createdAt)
 	})
 	if err != nil {
 		return nil, err

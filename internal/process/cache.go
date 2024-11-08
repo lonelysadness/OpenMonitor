@@ -36,15 +36,14 @@ func (c *ProcessCache) Get(key string) (*Process, bool) {
 		return nil, false
 	}
 
-	// Check if process needs update
+	// Validate process and update if needed
 	if time.Since(proc.lastUpdate) > updateThreshold {
 		proc.updateLock.Lock()
 		defer proc.updateLock.Unlock()
 
-		// Double-check after acquiring lock
 		if time.Since(proc.lastUpdate) > updateThreshold {
 			if err := proc.Update(); err != nil {
-				//	log.Warningf("failed to update process %d: %v", proc.Pid, err)
+				return nil, false
 			}
 		}
 	}

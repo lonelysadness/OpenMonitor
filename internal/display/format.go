@@ -3,7 +3,6 @@ package display
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lonelysadness/OpenMonitor/internal/netutils"
 	"github.com/lonelysadness/OpenMonitor/internal/process"
@@ -11,43 +10,16 @@ import (
 )
 
 const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorBlue   = "\033[34m"
-	ColorPurple = "\033[35m"
-	ColorCyan   = "\033[36m"
-	ColorWhite  = "\033[37m"
-	ColorBold   = "\033[1m"
+	ColorReset = "\033[0m"
+	ColorRed   = "\033[31m"
+	ColorGreen = "\033[32m"
+	ColorBlue  = "\033[34m"
+	ColorGray  = "\033[90m"
+	ColorBold  = "\033[1m"
 )
 
-func formatBytes(bytes uint64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := uint64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-func formatDuration(d time.Duration) string {
-	if d.Hours() > 24 {
-		days := int(d.Hours() / 24)
-		hours := int(d.Hours()) % 24
-		return fmt.Sprintf("%dd%dh", days, hours)
-	}
-	return d.Round(time.Second).String()
-}
-
 func PrintHeader() {
-	fmt.Println(ColorBold + strings.Repeat("=", 100) + ColorReset)
-	fmt.Println(ColorBold + "OpenMonitor - Network Connection Monitor" + ColorReset)
-	fmt.Println(ColorBold + strings.Repeat("=", 100) + ColorReset)
+	fmt.Printf("%s%s OpenMonitor %s\n", ColorBold, strings.Repeat("─", 30), strings.Repeat("─", 30))
 }
 
 func PrintEvent(event types.Event) {
@@ -56,72 +28,69 @@ func PrintEvent(event types.Event) {
 		return
 	}
 
-	// Network connection info
+	// Basic connection info
 	srcIP := netutils.ConvertArrayToIP(event.Saddr, event.IpVersion == 6)
 	dstIP := netutils.ConvertArrayToIP(event.Daddr, event.IpVersion == 6)
-	protocol := netutils.GetProtocolName(event.Protocol)
-	direction := netutils.GetDirectionSymbol(event.Direction)
-	color := getColor(event.Direction)
-
-	// Print connection header
-	fmt.Printf("\n%s%s=== New Connection ===%s\n", color, ColorBold, ColorReset)
-
-	// Fix the connection details formatting
-	fmt.Printf("%s↳ %s:%d → %s:%d%s\n",
-		color,
-		srcIP, uint16(event.Sport), // Explicitly cast to uint16
-		dstIP, uint16(event.Dport), // Explicitly cast to uint16
-		ColorReset)
-	fmt.Printf("  Protocol: %s %s\n", protocol, direction)
-
-	// Print process information
-	fmt.Printf("\n%s=== Process Information ===%s\n", ColorYellow, ColorReset)
-	fmt.Printf("  Name: %s (PID: %d)\n", proc.Name, proc.Pid)
-	fmt.Printf("  User: %s (ID: %d)\n", proc.UserName, proc.UserID)
-	fmt.Printf("  Path: %s\n", proc.Path)
-	if proc.CmdLine != "" {
-		fmt.Printf("  Command: %s\n", proc.CmdLine)
+	direction := event.Direction == types.OUTBOUND
+	color := ColorGreen
+	if !direction {
+		color = ColorBlue
 	}
 
-	// Container information if available
+	// Print one-line summary
+	fmt.Printf("\n%s%s%s ", color, GetDirectionArrow(direction), ColorReset)
 	if proc.IsContainer {
-		fmt.Printf("\n%s=== Container Information ===%s\n", ColorPurple, ColorReset)
-		fmt.Printf("  Type: %s\n", proc.ContainerType)
-		fmt.Printf("  ID: %s\n", proc.ContainerID)
-		if proc.ContainerName != "" {
-			fmt.Printf("  Name: %s\n", proc.ContainerName)
-		}
+		fmt.Printf("[%s] ", proc.ContainerType)
 	}
+	fmt.Printf("%s (%d) %s", proc.Name, proc.Pid, getUserString(proc))
 
-	// Process state and resource usage
-	fmt.Printf("\n%s=== Process State ===%s\n", ColorCyan, ColorReset)
-	fmt.Printf("  State: %s\n", proc.State)
-	fmt.Printf("  Running for: %s\n", formatDuration(time.Since(proc.StartTime)))
-	fmt.Printf("  CPU Usage: %.1f%%\n", proc.CPUUsage)
-	fmt.Printf("  Memory: %s (%.1f%%)\n", formatBytes(proc.MemoryUsage), proc.MemoryPercent)
-	fmt.Printf("  Threads: %d, FDs: %d\n", proc.NumThreads, proc.NumFDs)
+	// Connection details
+	fmt.Printf("\n    %s%s:%d → %s:%d%s [%s]\n",
+		color,
+		srcIP, event.Sport,
+		dstIP, event.Dport,
+		ColorReset,
+		netutils.GetProtocolName(event.Protocol),
+	)
 
-	// IO Statistics
-	if proc.IOCounters.ReadCount > 0 || proc.IOCounters.WriteCount > 0 {
-		fmt.Printf("\n%s=== I/O Statistics ===%s\n", ColorBlue, ColorReset)
-		fmt.Printf("  Read:  %s (%d operations)\n",
-			formatBytes(proc.IOCounters.ReadBytes),
-			proc.IOCounters.ReadCount)
-		fmt.Printf("  Write: %s (%d operations)\n",
-			formatBytes(proc.IOCounters.WriteBytes),
-			proc.IOCounters.WriteCount)
+	// Process details (limited)
+	fmt.Printf("    %s⤷ %s%s\n", ColorGray, proc.CmdLine, ColorReset)
+
+	// Print resource usage if significant
+	if proc.CPUUsage > 1.0 || proc.MemoryPercent > 1.0 {
+		fmt.Printf("    %s⤷ CPU: %.1f%%, Mem: %.1f%% (%s)%s\n",
+			ColorGray,
+			proc.CPUUsage,
+			proc.MemoryPercent,
+			formatBytes(proc.MemoryUsage),
+			ColorReset,
+		)
 	}
-
-	fmt.Println(strings.Repeat("-", 100))
 }
 
-func getColor(direction uint8) string {
-	switch direction {
-	case types.OUTBOUND:
-		return ColorGreen
-	case types.INBOUND:
-		return ColorBlue
-	default:
-		return ColorWhite
+func GetDirectionArrow(outbound bool) string {
+	if outbound {
+		return "▶"
 	}
+	return "◀"
+}
+
+func getUserString(p *process.Process) string {
+	if p.UserID == 0 {
+		return ColorRed + "root" + ColorReset
+	}
+	return p.UserName
+}
+
+func formatBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	div, exp := uint64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
