@@ -53,16 +53,17 @@ func PrintEvent(event types.Event) {
 		netutils.GetProtocolName(event.Protocol),
 	)
 
-	// Process details (limited)
-	fmt.Printf("    %s⤷ %s%s\n", ColorGray, proc.CmdLine, ColorReset)
+	// Process details
+	if proc.CmdLine != "" {
+		fmt.Printf("    %s⤷ %s%s\n", ColorGray, proc.CmdLine, ColorReset)
+	}
 
-	// Print resource usage if significant
-	if proc.CPUUsage > 1.0 || proc.MemoryPercent > 1.0 {
-		fmt.Printf("    %s⤷ CPU: %.1f%%, Mem: %.1f%% (%s)%s\n",
+	// Resource usage if available
+	if proc.CPUUsage > 0 || proc.MemoryPercent > 0 {
+		fmt.Printf("    %s⤷ CPU: %.1f%%, Mem: %.1f%%%s\n",
 			ColorGray,
 			proc.CPUUsage,
 			proc.MemoryPercent,
-			formatBytes(proc.MemoryUsage),
 			ColorReset,
 		)
 	}
