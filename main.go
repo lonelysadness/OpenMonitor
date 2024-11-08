@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	_ "github.com/lonelysadness/OpenMonitor/internal/process/handlers" // Register handlers
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -Werror" bpf ebpf/monitor.c

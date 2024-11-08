@@ -39,10 +39,21 @@ func PrintEvent(event types.Event) {
 
 	// Print one-line summary
 	fmt.Printf("\n%s%s%s ", color, GetDirectionArrow(direction), ColorReset)
-	if proc.IsContainer {
-		fmt.Printf("[%s] ", proc.ContainerType)
+
+	// Check container tag first
+	if containerTag, ok := proc.GetTag("container-type"); ok {
+		fmt.Printf("[%s] ", containerTag.Value)
 	}
+
+	// Print process info with any additional tags
 	fmt.Printf("%s (%d) %s", proc.Name, proc.Pid, getUserString(proc))
+
+	// Print any other relevant tags
+	for _, tag := range proc.Tags {
+		if tag.Key != "container-type" { // Skip container tag as it's already shown
+			fmt.Printf(" [%s: %s]", tag.Key, tag.Value)
+		}
+	}
 
 	// Connection details
 	fmt.Printf("\n    %s%s:%d → %s:%d%s [%s]\n",
