@@ -16,14 +16,35 @@ func getDockerID(procPath string) string {
 	}
 
 	for _, line := range strings.Split(string(data), "\n") {
+		// Look for the docker container ID pattern
 		if strings.Contains(line, "docker-") {
 			parts := strings.Split(line, "docker-")
 			if len(parts) > 1 {
-				return strings.Split(parts[1], ".")[0]
+				// Extract the ID and remove any trailing content
+				id := strings.Split(parts[1], ".")[0]
+				// Clean up the ID by removing any path components
+				if strings.Contains(id, "/") {
+					pathParts := strings.Split(id, "/")
+					id = pathParts[len(pathParts)-1]
+				}
+				// Verify it's a valid docker ID (64 hex chars)
+				if len(id) == 64 && isHexString(id) {
+					return id
+				}
 			}
 		}
 	}
 	return ""
+}
+
+// Add this helper function
+func isHexString(s string) bool {
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func detectContainer(pid int) (bool, map[string]string) {

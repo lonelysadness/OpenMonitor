@@ -8,10 +8,15 @@ import (
 )
 
 const (
-	UndefinedProcessID    = -1
-	UnidentifiedProcessID = -2
-	SystemProcessID       = -3
-	UnsolicitedProcessID  = -4
+	UndefinedProcessID                              = -1
+	UnidentifiedProcessID                           = -2
+	SystemProcessID                                 = -3
+	UnsolicitedProcessID                            = -4
+	StatusUnverified      ProcessVerificationStatus = iota
+	StatusValid
+	StatusInvalid
+	StatusZombie
+	StatusReaped
 )
 
 // Process represents a process running on the operating system
@@ -85,6 +90,17 @@ type Process struct {
 	isValid    bool
 	updateLock sync.Mutex
 	lastUpdate time.Time
+
+	// Verification fields
+	verificationStatus ProcessVerificationStatus
+	lastVerification   time.Time
+	verificationErrors []string
+
+	// Namespace tracking
+	nsInode   map[string]uint64 // Tracks namespace inodes
+	nsChanged bool              // Indicates namespace changes
+	hostPid   int               // PID in host namespace
+	inHostNs  bool              // Whether process is in host namespace
 }
 
 type IOStats struct {
@@ -102,11 +118,16 @@ type ProcessGroup struct {
 	LastSeen  int64
 }
 
+type ProcessVerificationStatus int
+
 func (p *Process) String() string {
 	return fmt.Sprintf("%s:%s:%d", p.UserName, p.Path, p.Pid)
 }
 
 func (p *Process) GetKey() string {
+	if p.processKey == "" {
+		p.processKey = fmt.Sprintf("%d-%d", p.Pid, p.CreatedAt)
+	}
 	return p.processKey
 }
 
@@ -156,10 +177,28 @@ func (p *Process) IsIdentified() bool {
 		return false
 	}
 
+	// Special processes are never considered identified
+	if p.IsSpecial {
+		return false
+	}
+
 	switch p.Pid {
-	case UndefinedProcessID, UnidentifiedProcessID, UnsolicitedProcessID:
+	case UndefinedProcessID, UnidentifiedProcessID, UnsolicitedProcessID, SystemProcessID:
 		return false
 	default:
 		return true
 	}
+}
+
+// Add verification methods
+func (p *Process) IsValid() bool {
+	p.Lock()
+	defer p.Unlock()
+	return p.verificationStatus == StatusValid
+}
+
+func (p *Process) GetVerificationErrors() []string {
+	p.Lock()
+	defer p.Unlock()
+	return append([]string{}, p.verificationErrors...)
 }
