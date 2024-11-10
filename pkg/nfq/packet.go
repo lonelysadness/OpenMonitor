@@ -8,6 +8,7 @@ import (
 
 	"github.com/florianl/go-nfqueue"
 	"github.com/tevino/abool"
+	"github.com/lonelysadness/OpenMonitor/pkg/netutils"
 )
 
 // Packet represents a network packet
@@ -75,13 +76,20 @@ func (p *Packet) setVerdict(mark uint32) error {
 	nfq := p.queue.nf.Load().(*nfqueue.Nfqueue)
 	for {
 		if err := nfq.SetVerdictWithMark(p.ID, nfqueue.NfAccept, int(mark)); err != nil {
-			// Check if error is temporary
+			// Check for temporary errors
 			if opErr, ok := err.(interface{ Temporary() bool }); ok && opErr.Temporary() {
 				continue
 			}
 			if opErr, ok := err.(interface{ Timeout() bool }); ok && opErr.Timeout() {
 				continue
 			}
+
+			// For non-temporary errors, trigger queue restart
+			select {
+			case p.queue.restart <- struct{}{}:
+			default:
+			}
+			
 			return fmt.Errorf("failed to set verdict %s: %w", markToString(mark), err)
 		}
 		return nil
@@ -165,6 +173,10 @@ func (p *Packet) IsUDP() bool {
 
 // String returns a string representation of the packet
 func (p *Packet) String() string {
-	return fmt.Sprintf("%s:%d -> %s:%d (Proto: %d, ID: %d)",
-		p.SrcIP, p.SrcPort, p.DstIP, p.DstPort, p.Protocol, p.ID)
+	srcScope := netutils.GetIPScope(p.SrcIP)
+	dstScope := netutils.GetIPScope(p.DstIP)
+	return fmt.Sprintf("%s(%s):%d -> %s(%s):%d (Proto: %d, ID: %d)",
+		p.SrcIP, srcScope, p.SrcPort, 
+		p.DstIP, dstScope, p.DstPort, 
+		p.Protocol, p.ID)
 }

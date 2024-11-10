@@ -5,24 +5,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lonelysadness/OpenMonitor/pkg/netutils"
 	"github.com/lonelysadness/OpenMonitor/pkg/nfq"
 )
 
-// ANSI color constants
+// ANSI color and style constants
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorPurple = "\033[35m"
-	colorCyan   = "\033[36m"
-	colorWhite  = "\033[37m"
+	colorReset   = "\033[0m"
+	colorRed     = "\033[31m"
+	colorGreen   = "\033[32m"
+	colorBlue    = "\033[34m"
+	colorCyan    = "\033[36m"
+	colorGray    = "\033[90m"
+	colorYellow  = "\033[33m"
+	colorMagenta = "\033[35m"
+	bold         = "\033[1m"
+	dim          = "\033[2m"
 )
 
+// Box drawing characters
 const (
-	maxConnections = 10 // Maximum number of connections to display
-	maxActivity    = 5  // Maximum number of activity lines to display
+	topLeft     = "┌"
+	topRight    = "┐"
+	bottomLeft  = "└"
+	bottomRight = "┘"
+	horizontal  = "─"
+	vertical    = "│"
 )
 
 type Activity struct {
@@ -32,19 +40,20 @@ type Activity struct {
 }
 
 type Terminal struct {
-	connections map[string]time.Time
+	connections map[string]time.Time // Add this field back
 	activities  []Activity
 	bandwidth   string
 }
 
 func NewTerminal() *Terminal {
 	return &Terminal{
-		connections: make(map[string]time.Time),
-		activities:  make([]Activity, 0, maxActivity),
-		bandwidth:   "No bandwidth data",
+		connections: make(map[string]time.Time), // Initialize connections
+		activities:  make([]Activity, 0, 5),
+		bandwidth:   "No data",
 	}
 }
 
+// Add these two missing methods
 func (t *Terminal) UpdateConnections(key string, timestamp time.Time) {
 	t.connections[key] = timestamp
 }
@@ -64,8 +73,8 @@ func (t *Terminal) AddActivity(direction string, message string) {
 		Message:   message,
 		Timestamp: time.Now(),
 	}}, t.activities...)
-	if len(t.activities) > maxActivity {
-		t.activities = t.activities[:maxActivity]
+	if len(t.activities) > 5 {
+		t.activities = t.activities[:5]
 	}
 }
 
@@ -75,88 +84,63 @@ func (t *Terminal) UpdateBandwidth(rx, tx uint64) {
 }
 
 func (t *Terminal) Display() {
-	clear := "\033[H\033[2J"
-	fmt.Print(clear)
+	// Clear screen
+	fmt.Print("\033[H\033[2J")
 
-	// Print header with current time
-	now := time.Now().Format("15:04:05")
-	fmt.Printf("=== %sOpenMonitor%s - %s%s%s ===\n\n",
-		colorCyan, colorReset, colorYellow, now, colorReset)
+	width := 80 // Assumed terminal width
 
-	// Print bandwidth in a more detailed format
-	if t.bandwidth == "No bandwidth data" {
-		fmt.Printf("%sBandwidth Monitor%s\n", colorPurple, colorReset)
-		fmt.Printf("├─ %sNo data available%s\n\n", colorYellow, colorReset)
-	} else {
-		fmt.Printf("%sBandwidth Monitor%s\n", colorPurple, colorReset)
-		fmt.Printf("├─ %sDownload:%s %s\n", colorBlue, colorReset, strings.Split(t.bandwidth, "TX:")[0])
-		fmt.Printf("└─ %sUpload:%s %s\n\n", colorGreen, colorReset, strings.Split(t.bandwidth, "TX:")[1])
-	}
+	// Draw title box
+	title := " Network Monitor "
+	padding := (width - len(title)) / 2
+	fmt.Printf("\n%s%s%s%s%s%s\n",
+		colorCyan,
+		topLeft+strings.Repeat(horizontal, padding-1),
+		bold+title+colorReset+colorCyan,
+		strings.Repeat(horizontal, padding-1),
+		topRight,
+		colorReset)
 
-	// Print recent activity as a continuous log
-	fmt.Printf("%sNetwork Activity Log%s\n", colorBlue, colorReset)
-	if len(t.activities) == 0 {
-		fmt.Printf("└─ %sNo recent activity%s\n", colorYellow, colorReset)
-	} else {
-		for i, act := range t.activities {
-			prefix := "├─"
-			if i == len(t.activities)-1 {
-				prefix = "└─"
-			}
+	// Bandwidth section
+	fmt.Printf("\n%s%s Bandwidth Monitor %s\n", bold, colorYellow, colorReset)
+	fmt.Printf("   %s%s%s\n\n", colorCyan, t.bandwidth, colorReset)
 
-			color := colorGreen
-			if act.Direction == "IN" {
-				color = colorCyan
-			}
+	// Activity section
+	fmt.Printf("%s%s Recent Activity %s\n", bold, colorYellow, colorReset)
+	fmt.Printf("%s%s%s\n", colorCyan, strings.Repeat(horizontal, width-2), colorReset)
 
-			age := time.Since(act.Timestamp).Round(time.Second)
-			fmt.Printf("%s %s[%s]%s [%s ago] %s\n",
-				prefix,
-				color, act.Direction, colorReset,
-				age, act.Message)
+	for _, act := range t.activities {
+		timestamp := act.Timestamp.Format("15:04:05")
+		color := colorGreen
+		if act.Direction == "IN" {
+			color = colorBlue
 		}
+
+		fmt.Printf(" %s%s%s %s%s%s %s%s%s\n",
+			colorGray, timestamp, colorReset,
+			bold, act.Direction, colorReset,
+			color, act.Message, colorReset)
 	}
 
-	// Print footer
-	fmt.Printf("\n%s=== Press Ctrl+C to exit ===%s\n",
-		colorYellow, colorReset)
+	// Footer
+	fmt.Printf("\n%s%s%s\n",
+		dim,
+		"Press Ctrl+C to exit",
+		colorReset)
 }
 
 func FormatPacketInfo(pkt nfq.Packet, isInbound bool) string {
-	direction := "⇦"
+	directionArrow := "↙" // inbound arrow
 	if !isInbound {
-		direction = "⇨"
+		directionArrow = "↗" // outbound arrow
 	}
 
-	proto := "Unknown"
-	switch pkt.Protocol {
-	case nfq.ProtocolTCP:
-		proto = "TCP"
-	case nfq.ProtocolUDP:
-		proto = "UDP"
-	case nfq.ProtocolICMP:
-		proto = "ICMPv4"
-	case nfq.ProtocolICMP6:
-		proto = "ICMPv6"
-	case nfq.ProtocolIGMP:
-		proto = "IGMP"
-	}
+	srcScope := netutils.GetIPScope(pkt.SrcIP)
+	dstScope := netutils.GetIPScope(pkt.DstIP)
 
-	// For ICMP/IGMP packets, don't show ports
-	if pkt.IsICMP() || pkt.IsIGMP() {
-		return fmt.Sprintf("%s %s %s %s",
-			proto,
-			pkt.SrcIP,
-			direction,
-			pkt.DstIP)
-	}
-
-	return fmt.Sprintf("%s %s:%d %s %s:%d (%s)",
-		proto,
-		pkt.SrcIP, pkt.SrcPort,
-		direction,
-		pkt.DstIP, pkt.DstPort,
-		getServiceName(pkt.DstPort))
+	return fmt.Sprintf("%s(%s):%d %s(%s):%d %s",
+		pkt.SrcIP, srcScope, pkt.SrcPort,
+		pkt.DstIP, dstScope, pkt.DstPort,
+		directionArrow)
 }
 
 // Helper function to format bytes
@@ -171,17 +155,4 @@ func formatBytes(bytes uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-// Helper function to get common service names
-func getServiceName(port uint16) string {
-	services := map[uint16]string{
-		53: "DNS", 80: "HTTP", 443: "HTTPS",
-		22: "SSH", 25: "SMTP", 110: "POP3",
-		143: "IMAP", 67: "DHCP", 68: "DHCP",
-	}
-	if name, ok := services[port]; ok {
-		return name
-	}
-	return fmt.Sprintf("PORT-%d", port)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -27,21 +28,48 @@ type Queue struct {
 
 // New opens a new nfQueue
 func New(qid uint16, v6 bool) (*Queue, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	q := &Queue{
 		id:               qid,
 		afFamily:         2, // AF_INET
 		packets:          make(chan Packet, 1000),
 		restart:          make(chan struct{}, 1),
 		verdictCompleted: make(chan struct{}, 1),
+		cancelSocketCallback: cancel,
 	}
 
 	if v6 {
 		q.afFamily = 10 // AF_INET6
 	}
 
-	if err := q.open(context.Background()); err != nil {
+	if err := q.open(ctx); err != nil {
 		return nil, err
 	}
+
+	// Add socket recovery goroutine
+	go func() {
+	Wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-q.restart:
+				runtime.Gosched()
+			}
+
+			for {
+				err := q.open(ctx)
+				if err == nil {
+					continue Wait
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+		}
+	}()
 
 	return q, nil
 }

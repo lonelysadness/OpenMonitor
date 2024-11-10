@@ -32,29 +32,30 @@ var (
 		"mangle OPENMONITOR-INGEST-INPUT -j CONNMARK --restore-mark",
 		"mangle OPENMONITOR-INGEST-INPUT -m mark --mark 0 -j NFQUEUE --queue-num 17041 --queue-bypass",
 
-		// Filter rules
+		// Filter rules (order is important)
 		"filter OPENMONITOR-FILTER -m mark --mark 0 -j DROP",
-		"filter OPENMONITOR-FILTER -m mark --mark 1700 -j RETURN",
-		"filter OPENMONITOR-FILTER -m mark --mark 1701 -p icmp -j RETURN",
-		"filter OPENMONITOR-FILTER -m mark --mark 1701 -j REJECT --reject-with icmp-admin-prohibited",
-		"filter OPENMONITOR-FILTER -m mark --mark 1702 -j DROP",
-		"filter OPENMONITOR-FILTER -j CONNMARK --save-mark",
+		
+		// Handle ICMP first
+		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1701 -j RETURN",
+		"filter OPENMONITOR-FILTER -p icmpv6 -m mark --mark 1701 -j RETURN",
+		
+		// Always rules
 		"filter OPENMONITOR-FILTER -m mark --mark 1710 -j RETURN",
 		"filter OPENMONITOR-FILTER -m mark --mark 1711 -p icmp -j RETURN",
+		"filter OPENMONITOR-FILTER -m mark --mark 1711 -p icmpv6 -j RETURN",
 		"filter OPENMONITOR-FILTER -m mark --mark 1711 -j REJECT --reject-with icmp-admin-prohibited",
 		"filter OPENMONITOR-FILTER -m mark --mark 1712 -j DROP",
-		"filter OPENMONITOR-FILTER -j ACCEPT", // Default accept
 
-		// Add IGMP rules
+		// Regular rules
+		"filter OPENMONITOR-FILTER -m mark --mark 1700 -j RETURN",
+		"filter OPENMONITOR-FILTER -m mark --mark 1701 -j REJECT --reject-with icmp-admin-prohibited",
+		"filter OPENMONITOR-FILTER -m mark --mark 1702 -j DROP",
+		
+		// Save connection mark after processing
+		"filter OPENMONITOR-FILTER -j CONNMARK --save-mark",
+
+		// Protocol specific rules
 		"filter OPENMONITOR-FILTER -p igmp -j ACCEPT",
-
-		// Update ICMP rules to be more specific
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1700 -j RETURN",
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1701 -j RETURN",
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1702 -j DROP",
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1710 -j RETURN",
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1711 -j RETURN",
-		"filter OPENMONITOR-FILTER -p icmp -m mark --mark 1712 -j DROP",
 	}
 
 	// IPv6 rules
@@ -89,12 +90,10 @@ var (
 
 	// IPv4 base rules
 	v4once = []string{
-		"filter INPUT -j ACCEPT",  // Add explicit ACCEPT
-		"filter OUTPUT -j ACCEPT", // Add explicit ACCEPT
-		"mangle OUTPUT -j OPENMONITOR-INGEST-OUTPUT",
-		"mangle INPUT -j OPENMONITOR-INGEST-INPUT",
-		"filter OUTPUT -j OPENMONITOR-FILTER",
-		"filter INPUT -j OPENMONITOR-FILTER",
+			"mangle OUTPUT -j OPENMONITOR-INGEST-OUTPUT",
+			"mangle INPUT -j OPENMONITOR-INGEST-INPUT", 
+			"filter OUTPUT -j OPENMONITOR-FILTER",
+			"filter INPUT -j OPENMONITOR-FILTER",
 	}
 
 	// IPv6 base rules
