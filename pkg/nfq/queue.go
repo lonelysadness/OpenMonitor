@@ -13,6 +13,18 @@ import (
 	"github.com/tevino/abool"
 )
 
+// QueueStats holds statistics for packet verdicts
+type QueueStats struct {
+	Total      uint64
+	Accept     uint64
+	Block      uint64
+	Drop       uint64
+	AcceptPerm uint64
+	BlockPerm  uint64
+	DropPerm   uint64
+	Errors     uint64
+}
+
 // Queue wraps a nfqueue
 type Queue struct {
 	id                   uint16
@@ -20,21 +32,33 @@ type Queue struct {
 	nf                   atomic.Value
 	packets              chan Packet
 	cancelSocketCallback context.CancelFunc
-	restart              chan struct{}
+	Restart              chan struct{}
 
 	pendingVerdicts  uint64
 	verdictCompleted chan struct{}
+
+	// Make stats public
+	Stats struct {
+		Accept     uint64
+		Block      uint64
+		Drop       uint64
+		AcceptPerm uint64
+		BlockPerm  uint64
+		DropPerm   uint64
+		Errors     uint64
+		Total      uint64 // Add this for tracking total packets
+	}
 }
 
 // New opens a new nfQueue
 func New(qid uint16, v6 bool) (*Queue, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	q := &Queue{
-		id:               qid,
-		afFamily:         2, // AF_INET
-		packets:          make(chan Packet, 1000),
-		restart:          make(chan struct{}, 1),
-		verdictCompleted: make(chan struct{}, 1),
+		id:                   qid,
+		afFamily:             2,                        // AF_INET
+		packets:              make(chan Packet, 10000), // Increase buffer size
+		Restart:              make(chan struct{}, 1),
+		verdictCompleted:     make(chan struct{}, 100), // Increase buffer size
 		cancelSocketCallback: cancel,
 	}
 
@@ -53,7 +77,7 @@ func New(qid uint16, v6 bool) (*Queue, error) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-q.restart:
+			case <-q.Restart:
 				runtime.Gosched()
 			}
 
@@ -125,8 +149,11 @@ func (q *Queue) open(ctx context.Context) error {
 
 func (q *Queue) handlePacket(attr nfqueue.Attribute) int {
 	if attr.PacketID == nil {
+		atomic.AddUint64(&q.Stats.Errors, 1)
 		return 0
 	}
+
+	atomic.AddUint64(&q.Stats.Total, 1) // Use Total instead of Processed
 
 	pkt := &Packet{
 		ID:             *attr.PacketID,
@@ -176,8 +203,13 @@ func (q *Queue) handlePacket(attr nfqueue.Attribute) int {
 
 	select {
 	case q.packets <- *pkt:
+		// Successfully queued
 	default:
-		fmt.Printf("Warning: packet queue full, dropping packet\n")
+		// Queue is full, accept packet
+		if nfq := q.nf.Load().(*nfqueue.Nfqueue); nfq != nil {
+			_ = nfq.SetVerdict(pkt.ID, nfqueue.NfDrop)
+		}
+		atomic.AddUint64(&q.Stats.Errors, 1) // Count as error instead of dropped
 	}
 
 	return 0
@@ -197,4 +229,21 @@ func (q *Queue) Destroy() {
 // PacketChannel returns the packet channel
 func (q *Queue) PacketChannel() <-chan Packet {
 	return q.packets
+}
+
+func (q *Queue) ID() uint16 {
+	return q.id
+}
+
+func (q *Queue) GetVerdictStats() QueueStats {
+	return QueueStats{
+		Total:      atomic.LoadUint64(&q.Stats.Total),
+		Accept:     atomic.LoadUint64(&q.Stats.Accept),
+		Block:      atomic.LoadUint64(&q.Stats.Block),
+		Drop:       atomic.LoadUint64(&q.Stats.Drop),
+		AcceptPerm: atomic.LoadUint64(&q.Stats.AcceptPerm),
+		BlockPerm:  atomic.LoadUint64(&q.Stats.BlockPerm),
+		DropPerm:   atomic.LoadUint64(&q.Stats.DropPerm),
+		Errors:     atomic.LoadUint64(&q.Stats.Errors),
+	}
 }

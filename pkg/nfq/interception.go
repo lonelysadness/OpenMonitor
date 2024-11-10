@@ -56,6 +56,15 @@ var (
 
 		// Protocol specific rules
 		"filter OPENMONITOR-FILTER -p igmp -j ACCEPT",
+
+		// Filter rules that handle marks
+		"filter OPENMONITOR-FILTER -m mark --mark 0 -j DROP",
+		"filter OPENMONITOR-FILTER -m mark --mark 1700 -j RETURN",      // Accept
+		"filter OPENMONITOR-FILTER -m mark --mark 1701 -j REJECT",      // Block
+		"filter OPENMONITOR-FILTER -m mark --mark 1702 -j DROP",        // Drop
+		"filter OPENMONITOR-FILTER -m mark --mark 1710 -j RETURN",      // Accept Always
+		"filter OPENMONITOR-FILTER -m mark --mark 1711 -j REJECT",      // Block Always
+		"filter OPENMONITOR-FILTER -m mark --mark 1712 -j DROP",        // Drop Always
 	}
 
 	// IPv6 rules

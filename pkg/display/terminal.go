@@ -43,6 +43,7 @@ type Terminal struct {
 	connections map[string]time.Time // Add this field back
 	activities  []Activity
 	bandwidth   string
+	queueStats  string
 }
 
 func NewTerminal() *Terminal {
@@ -83,6 +84,47 @@ func (t *Terminal) UpdateBandwidth(rx, tx uint64) {
 		formatBytes(rx), formatBytes(tx))
 }
 
+type QueueStats struct {
+	Total      uint64
+	Accept     uint64
+	Block      uint64
+	Drop       uint64
+	AcceptPerm uint64
+	BlockPerm  uint64
+	DropPerm   uint64
+	Errors     uint64
+}
+
+func (t *Terminal) UpdateQueueStats(inQueue, outQueue *nfq.Queue) {
+	inStats := inQueue.GetVerdictStats()
+	outStats := outQueue.GetVerdictStats()
+
+	t.queueStats = fmt.Sprintf(
+		"IN Queue (#%d):\n"+
+			"  Total: %d packets\n"+
+			"  Accept: %d (Permanent: %d)\n"+
+			"  Block: %d (Permanent: %d)\n"+
+			"  Drop: %d (Permanent: %d)\n"+
+			"  Errors: %d\n\n"+
+			"OUT Queue (#%d):\n"+
+			"  Total: %d packets\n"+
+			"  Accept: %d (Permanent: %d)\n"+
+			"  Block: %d (Permanent: %d)\n"+
+			"  Drop: %d (Permanent: %d)\n"+
+			"  Errors: %d",
+		inQueue.ID(), inStats.Total,
+		inStats.Accept, inStats.AcceptPerm,
+		inStats.Block, inStats.BlockPerm,
+		inStats.Drop, inStats.DropPerm,
+		inStats.Errors,
+		outQueue.ID(), outStats.Total,
+		outStats.Accept, outStats.AcceptPerm,
+		outStats.Block, outStats.BlockPerm,
+		outStats.Drop, outStats.DropPerm,
+		outStats.Errors,
+	)
+}
+
 func (t *Terminal) Display() {
 	// Clear screen
 	fmt.Print("\033[H\033[2J")
@@ -103,6 +145,10 @@ func (t *Terminal) Display() {
 	// Bandwidth section
 	fmt.Printf("\n%s%s Bandwidth Monitor %s\n", bold, colorYellow, colorReset)
 	fmt.Printf("   %s%s%s\n\n", colorCyan, t.bandwidth, colorReset)
+
+	// Add queue stats section after bandwidth
+	fmt.Printf("\n%s%s Queue Statistics %s\n", bold, colorYellow, colorReset)
+	fmt.Printf("%s%s%s\n\n", colorCyan, t.queueStats, colorReset)
 
 	// Activity section
 	fmt.Printf("%s%s Recent Activity %s\n", bold, colorYellow, colorReset)

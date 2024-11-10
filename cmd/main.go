@@ -69,7 +69,7 @@ func main() {
 
 	// Start the monitor
 	monitor := display.NewMonitor()
-	go monitor.Start(ctx, connEvents, bandwidthUpdates, inQueue.PacketChannel(), outQueue.PacketChannel())
+	go monitor.Start(ctx, connEvents, bandwidthUpdates, inQueue.PacketChannel(), outQueue.PacketChannel(), inQueue, outQueue)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

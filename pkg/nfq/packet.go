@@ -8,7 +8,6 @@ import (
 
 	"github.com/florianl/go-nfqueue"
 	"github.com/tevino/abool"
-	"github.com/lonelysadness/OpenMonitor/pkg/netutils"
 )
 
 // Packet represents a network packet
@@ -35,13 +34,6 @@ const (
 	MarkAcceptAlways = 1710
 	MarkBlockAlways  = 1711
 	MarkDropAlways   = 1712
-
-	// Protocol constants
-	ProtocolICMP  = 1
-	ProtocolIGMP  = 2
-	ProtocolTCP   = 6
-	ProtocolUDP   = 17
-	ProtocolICMP6 = 58
 )
 
 func markToString(mark uint32) string {
@@ -73,35 +65,49 @@ func (p *Packet) setVerdict(mark uint32) error {
 		}
 	}()
 
+	// Synchronous verdict setting with retries
 	nfq := p.queue.nf.Load().(*nfqueue.Nfqueue)
-	for {
-		if err := nfq.SetVerdictWithMark(p.ID, nfqueue.NfAccept, int(mark)); err != nil {
-			// Check for temporary errors
-			if opErr, ok := err.(interface{ Temporary() bool }); ok && opErr.Temporary() {
-				continue
+	for attempt := 0; attempt < 5; attempt++ {
+		err := nfq.SetVerdictWithMark(p.ID, nfqueue.NfAccept, int(mark))
+		if err == nil {
+			// Update verdict statistics
+			switch mark {
+			case MarkAccept:
+				atomic.AddUint64(&p.queue.Stats.Accept, 1)
+			case MarkBlock:
+				atomic.AddUint64(&p.queue.Stats.Block, 1)
+			case MarkDrop:
+				atomic.AddUint64(&p.queue.Stats.Drop, 1)
+			case MarkAcceptAlways:
+				atomic.AddUint64(&p.queue.Stats.AcceptPerm, 1)
+			case MarkBlockAlways:
+				atomic.AddUint64(&p.queue.Stats.BlockPerm, 1)
+			case MarkDropAlways:
+				atomic.AddUint64(&p.queue.Stats.DropPerm, 1)
 			}
-			if opErr, ok := err.(interface{ Timeout() bool }); ok && opErr.Timeout() {
-				continue
-			}
-
-			// For non-temporary errors, trigger queue restart
-			select {
-			case p.queue.restart <- struct{}{}:
-			default:
-			}
-			
-			return fmt.Errorf("failed to set verdict %s: %w", markToString(mark), err)
+			return nil
 		}
-		return nil
+
+		// Check if error is temporary
+		if opErr, ok := err.(interface{ Temporary() bool }); ok && opErr.Temporary() {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+
+		// Terminal error, trigger queue restart
+		select {
+		case p.queue.Restart <- struct{}{}:
+		default:
+		}
+		return fmt.Errorf("failed to set verdict %s (attempt %d): %w", markToString(mark), attempt, err)
 	}
+
+	atomic.AddUint64(&p.queue.Stats.Errors, 1)
+	return fmt.Errorf("failed to set verdict after 5 attempts")
 }
 
 func (p *Packet) Accept() error {
-	if p.verdictPending.SetToIf(false, true) {
-		defer close(p.verdictSet)
-		return p.setVerdict(MarkAccept)
-	}
-	return fmt.Errorf("verdict already set")
+	return p.setVerdict(MarkAccept)
 }
 
 func (p *Packet) Block() error {
@@ -152,31 +158,4 @@ func (p *Packet) PermanentDrop() error {
 		return p.setVerdict(MarkDropAlways)
 	}
 	return fmt.Errorf("verdict already set")
-}
-
-// Add helper methods
-func (p *Packet) IsICMP() bool {
-	return p.Protocol == ProtocolICMP || p.Protocol == ProtocolICMP6
-}
-
-func (p *Packet) IsIGMP() bool {
-	return p.Protocol == ProtocolIGMP
-}
-
-func (p *Packet) IsTCP() bool {
-	return p.Protocol == ProtocolTCP
-}
-
-func (p *Packet) IsUDP() bool {
-	return p.Protocol == ProtocolUDP
-}
-
-// String returns a string representation of the packet
-func (p *Packet) String() string {
-	srcScope := netutils.GetIPScope(p.SrcIP)
-	dstScope := netutils.GetIPScope(p.DstIP)
-	return fmt.Sprintf("%s(%s):%d -> %s(%s):%d (Proto: %d, ID: %d)",
-		p.SrcIP, srcScope, p.SrcPort, 
-		p.DstIP, dstScope, p.DstPort, 
-		p.Protocol, p.ID)
 }
